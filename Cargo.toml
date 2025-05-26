@@ -1,0 +1,15 @@
+[package]
+name = "waitfree-sync"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.60"
+
+[dependencies]
+crossbeam-utils = "0.8"
+
+[target.'cfg(loom)'.dependencies]
+loom = "0.7"
+
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }
