@@ -7,22 +7,24 @@ use std::fmt::Debug;
 use std::thread;
 use waitfree_sync::triple_buffer;
 
+#[cfg(loom)]
+const COUNT: i32 = 4;
+#[cfg(all(not(loom), not(miri)))]
+const COUNT: i32 = 10_000;
+#[cfg(miri)]
+const COUNT: i32 = 1000;
+
 type Payload = [i32; 50];
 fn test_multithread<E: PartialEq + Debug>(
     reader_writer: (
-        impl ReadPrimitive<Payload> + Send + Sync + 'static,
         impl WritePrimitive<Payload, E> + Send + Sync + 'static,
+        impl ReadPrimitive<Payload> + Send + Sync + 'static,
     ),
 ) {
-    let (mut reader, mut writer) = reader_writer;
+    let (mut writer, mut reader) = reader_writer;
     assert_eq!(writer.write([1; 50]), Ok(()));
     assert_eq!(reader.read(), Some([1; 50]));
-    #[cfg(loom)]
-    const COUNT: i32 = 4;
-    #[cfg(all(not(loom), not(miri)))]
-    const COUNT: i32 = 10_000;
-    #[cfg(miri)]
-    const COUNT: i32 = 1000;
+
     let writer_thread = thread::spawn(move || {
         thread::park();
         for i in 0..COUNT {
@@ -71,37 +73,31 @@ pub enum SomeEnum {
 
 fn test_heapdata<E: PartialEq + Debug>(
     reader_writer: (
-        impl ReadPrimitive<SomeStruct> + Send + Sync + 'static,
         impl WritePrimitive<SomeStruct, E> + Send + Sync + 'static,
+        impl ReadPrimitive<SomeStruct> + Send + Sync + 'static,
     ),
 ) {
-    let (mut reader, mut writer) = reader_writer;
+    let (mut writer, mut reader) = reader_writer;
     assert_eq!(writer.write(SomeStruct::default()), Ok(()));
     assert_eq!(reader.read(), Some(SomeStruct::default()));
 }
 
 fn test_heapdata_multithread<E: PartialEq + Debug>(
     reader_writer: (
-        impl ReadPrimitive<SomeStruct> + Send + Sync + 'static,
         impl WritePrimitive<SomeStruct, E> + Send + Sync + 'static,
+        impl ReadPrimitive<SomeStruct> + Send + Sync + 'static,
     ),
 ) {
-    let (mut reader, mut writer) = reader_writer;
+    let (mut writer, mut reader) = reader_writer;
     assert_eq!(writer.write(SomeStruct::default()), Ok(()));
     assert_eq!(reader.read(), Some(SomeStruct::default()));
-    #[cfg(loom)]
-    const COUNT: i32 = 4;
-    #[cfg(all(not(loom), not(miri)))]
-    const COUNT: i32 = 10_000;
-    #[cfg(miri)]
-    const COUNT: i32 = 1000;
     let writer_thread = thread::spawn(move || {
         thread::park();
         for i in 0..COUNT {
             assert_eq!(
                 writer.write(SomeStruct {
                     counter: i,
-                    inner_field: vec![Some(SomeEnum::State3)]
+                    inner_field: vec![Some(SomeEnum::State1)]
                 }),
                 Ok(())
             );
@@ -111,7 +107,7 @@ fn test_heapdata_multithread<E: PartialEq + Debug>(
         thread::park();
         for _ in 0..COUNT {
             if let Some(val) = reader.read() {
-                assert_eq!(val.inner_field, vec![Some(SomeEnum::State3)]);
+                assert_eq!(val.inner_field, vec![Some(SomeEnum::State1)]);
             }
         }
     });

@@ -23,12 +23,12 @@ impl<T> Slot<T> {
     }
 }
 
-pub fn triple_buffer<T>() -> (Reader<T>, Writer<T>) {
+pub fn triple_buffer<T>() -> (Writer<T>, Reader<T>) {
     let chan = Arc::new(TripleBufferRaw::new());
 
-    let r = Reader::new(chan.clone());
-    let w = Writer::new(chan);
-    (r, w)
+    let w = Writer::new(chan.clone());
+    let r = Reader::new(chan);
+    (w, r)
 }
 
 #[derive(Debug)]
@@ -70,6 +70,7 @@ impl<T> Reader<T> {
 pub struct Writer<T> {
     raw_mem: Arc<TripleBufferRaw<T>>,
     write_idx: usize,
+    last_written: Option<usize>,
 }
 unsafe impl<T: Send> Send for Writer<T> {}
 unsafe impl<T: Send> Sync for Writer<T> {}
@@ -79,7 +80,23 @@ impl<T> Writer<T> {
         Writer {
             raw_mem,
             write_idx: 2,
+            last_written: None,
         }
+    }
+
+    #[inline]
+    pub fn read(&mut self) -> Option<T>
+    where
+        T: Clone,
+    {
+        let last_written = self.last_written?;
+        let slot = unsafe { &*self.raw_mem.slot };
+
+        #[cfg(loom)]
+        let val = unsafe { slot.mem[last_written].get().deref() }.clone();
+        #[cfg(not(loom))]
+        let val = unsafe { &*slot.mem[last_written].get() }.clone();
+        val
     }
 
     #[inline]
@@ -95,6 +112,8 @@ impl<T> Writer<T> {
             // Drop old value and write new one
             let _ = (*slot.mem[self.write_idx & INDEX_MASK].get()).insert(data);
         };
+        // Store index
+        self.last_written = Some(self.write_idx & INDEX_MASK);
         self.write_idx = slot
             .latest_free
             .swap(self.write_idx | NEW_DATA_FLAG, Ordering::AcqRel);
@@ -122,5 +141,59 @@ impl<T> Drop for TripleBufferRaw<T> {
     fn drop(&mut self) {
         // This is required to drop the memory allocated in [TripleBufferRaw<T>::new()]
         unsafe { drop(Box::from_raw(self.slot)) };
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    #[cfg(loom)]
+    use loom::thread;
+    #[cfg(not(loom))]
+    use std::thread;
+
+    #[cfg(loom)]
+    const COUNT: i32 = 4;
+    #[cfg(all(not(loom), not(miri)))]
+    const COUNT: i32 = 10_000;
+    #[cfg(miri)]
+    const COUNT: i32 = 1000;
+
+    #[test]
+    fn smoke() {
+        let (mut w, mut r) = triple_buffer();
+        w.write(vec![0; 15]);
+        assert_eq!(w.read(), Some(vec![0; 15]));
+        assert_eq!(r.read(), Some(vec![0; 15]));
+    }
+
+    #[cfg(not(loom))]
+    #[test]
+    fn test_read_on_writer_multithreaded() {
+        let (mut w, mut r) = triple_buffer();
+        w.write(vec![0; 15]);
+        assert_eq!(r.read(), Some(vec![0; 15]));
+        let writer_thread = thread::spawn(move || {
+            thread::park();
+            for i in 0..COUNT {
+                w.write(vec![i; 15]);
+                assert_eq!(w.read(), Some(vec![i; 15]));
+            }
+        });
+        let reader_thread = thread::spawn(move || {
+            thread::park();
+            for _ in 0..COUNT {
+                if let Some(val) = r.read() {
+                    let first_entry = val[0];
+                    for entry in val {
+                        assert_eq!(entry, first_entry);
+                    }
+                }
+            }
+        });
+        writer_thread.thread().unpark();
+        reader_thread.thread().unpark();
+        assert!(writer_thread.join().is_ok());
+        assert!(reader_thread.join().is_ok());
     }
 }
