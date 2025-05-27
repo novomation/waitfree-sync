@@ -1,5 +1,4 @@
 use crate::import::{Arc, AtomicUsize, Ordering, UnsafeCell};
-use crate::inital_write_guard::InitialWriteGuard;
 use crossbeam_utils::CachePadded;
 
 const NEW_DATA_FLAG: usize = 0b100;
@@ -9,7 +8,6 @@ const INDEX_MASK: usize = 0b011;
 struct Slot<T: Sized> {
     mem: [UnsafeCell<Option<T>>; 3],
     latest_free: CachePadded<AtomicUsize>,
-    write_guard: InitialWriteGuard,
 }
 
 impl<T> Slot<T> {
@@ -21,7 +19,6 @@ impl<T> Slot<T> {
                 UnsafeCell::new(None),
             ],
             latest_free: CachePadded::new(0.into()),
-            write_guard: InitialWriteGuard::new(),
         }
     }
 }
@@ -50,14 +47,12 @@ impl<T> Reader<T> {
         }
     }
 
+    #[inline]
     pub fn read(&mut self) -> Option<T>
     where
         T: Clone,
     {
         let slot = unsafe { &*self.raw_mem.slot };
-        if !slot.write_guard.has_data() {
-            return None;
-        }
         let has_new_data = slot.latest_free.load(Ordering::Acquire) & NEW_DATA_FLAG > 0;
         if has_new_data {
             self.read_idx = slot.latest_free.swap(self.read_idx, Ordering::AcqRel) & INDEX_MASK;
@@ -86,6 +81,8 @@ impl<T> Writer<T> {
             write_idx: 2,
         }
     }
+
+    #[inline]
     pub fn write(&mut self, data: T) {
         let slot = unsafe { &*self.raw_mem.slot };
 
@@ -101,7 +98,6 @@ impl<T> Writer<T> {
         self.write_idx = slot
             .latest_free
             .swap(self.write_idx | NEW_DATA_FLAG, Ordering::AcqRel);
-        slot.write_guard.set_has_data();
     }
 }
 
