@@ -1,5 +1,3 @@
-use std::mem;
-
 use crate::import::{Arc, AtomicUsize, Ordering, UnsafeCell};
 use crate::inital_write_guard::InitialWriteGuard;
 use crossbeam_utils::CachePadded;
@@ -9,7 +7,7 @@ const INDEX_MASK: usize = 0b011;
 
 #[derive(Debug)]
 struct Slot<T: Sized> {
-    mem: [UnsafeCell<T>; 3],
+    mem: [UnsafeCell<Option<T>>; 3],
     latest_free: CachePadded<AtomicUsize>,
     write_guard: InitialWriteGuard,
 }
@@ -18,9 +16,9 @@ impl<T> Slot<T> {
     fn new() -> Self {
         Slot {
             mem: [
-                UnsafeCell::new(unsafe { mem::zeroed() }),
-                UnsafeCell::new(unsafe { mem::zeroed() }),
-                UnsafeCell::new(unsafe { mem::zeroed() }),
+                UnsafeCell::new(None),
+                UnsafeCell::new(None),
+                UnsafeCell::new(None),
             ],
             latest_free: CachePadded::new(0.into()),
             write_guard: InitialWriteGuard::new(),
@@ -66,10 +64,10 @@ impl<T> Reader<T> {
         }
 
         #[cfg(loom)]
-        let val = unsafe { slot.mem[self.read_idx].get().deref().clone() };
+        let val = unsafe { slot.mem[self.read_idx].get().deref() }.clone();
         #[cfg(not(loom))]
-        let val = unsafe { slot.mem[self.read_idx].get().read().clone() };
-        Some(val)
+        let val = unsafe { &*slot.mem[self.read_idx].get() }.clone();
+        val
     }
 }
 
@@ -93,11 +91,12 @@ impl<T> Writer<T> {
 
         #[cfg(loom)]
         unsafe {
-            *slot.mem[self.write_idx & INDEX_MASK].get_mut().deref() = data
+            let _ = (*slot.mem[self.write_idx & INDEX_MASK].get_mut().deref()).insert(data);
         };
         #[cfg(not(loom))]
         unsafe {
-            slot.mem[self.write_idx & INDEX_MASK].get().write(data);
+            // Drop old value and write new one
+            let _ = (*slot.mem[self.write_idx & INDEX_MASK].get()).insert(data);
         };
         self.write_idx = slot
             .latest_free

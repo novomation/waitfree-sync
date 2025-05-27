@@ -1,15 +1,14 @@
 mod common;
 use common::{ReadPrimitive, WritePrimitive};
-use waitfree_sync::triple_buffer;
-
 #[cfg(loom)]
 use loom::thread;
 use std::fmt::Debug;
 #[cfg(not(loom))]
 use std::thread;
+use waitfree_sync::triple_buffer;
 
 type Payload = [i32; 50];
-fn generic_test<E: PartialEq + Debug>(
+fn test_multithread<E: PartialEq + Debug>(
     reader_writer: (
         impl ReadPrimitive<Payload> + Send + Sync + 'static,
         impl WritePrimitive<Payload, E> + Send + Sync + 'static,
@@ -23,7 +22,7 @@ fn generic_test<E: PartialEq + Debug>(
     #[cfg(all(not(loom), not(miri)))]
     const COUNT: i32 = 10_000;
     #[cfg(miri)]
-    const COUNT: i32 = 300;
+    const COUNT: i32 = 1000;
     let writer_thread = thread::spawn(move || {
         thread::park();
         for i in 0..COUNT {
@@ -47,10 +46,87 @@ fn generic_test<E: PartialEq + Debug>(
     assert!(reader_thread.join().is_ok());
 }
 
+#[derive(Debug, PartialEq, Clone)]
+pub struct SomeStruct {
+    pub counter: i32,
+    pub inner_field: Vec<Option<SomeEnum>>,
+}
+impl Default for SomeStruct {
+    fn default() -> Self {
+        Self {
+            counter: 0,
+            inner_field: vec![Some(SomeEnum::State1)],
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum SomeEnum {
+    State1,
+    State2,
+    State3,
+    State4,
+    State5,
+}
+
+fn test_heapdata<E: PartialEq + Debug>(
+    reader_writer: (
+        impl ReadPrimitive<SomeStruct> + Send + Sync + 'static,
+        impl WritePrimitive<SomeStruct, E> + Send + Sync + 'static,
+    ),
+) {
+    let (mut reader, mut writer) = reader_writer;
+    assert_eq!(writer.write(SomeStruct::default()), Ok(()));
+    assert_eq!(reader.read(), Some(SomeStruct::default()));
+}
+
+fn test_heapdata_multithread<E: PartialEq + Debug>(
+    reader_writer: (
+        impl ReadPrimitive<SomeStruct> + Send + Sync + 'static,
+        impl WritePrimitive<SomeStruct, E> + Send + Sync + 'static,
+    ),
+) {
+    let (mut reader, mut writer) = reader_writer;
+    assert_eq!(writer.write(SomeStruct::default()), Ok(()));
+    assert_eq!(reader.read(), Some(SomeStruct::default()));
+    #[cfg(loom)]
+    const COUNT: i32 = 4;
+    #[cfg(all(not(loom), not(miri)))]
+    const COUNT: i32 = 10_000;
+    #[cfg(miri)]
+    const COUNT: i32 = 1000;
+    let writer_thread = thread::spawn(move || {
+        thread::park();
+        for i in 0..COUNT {
+            assert_eq!(
+                writer.write(SomeStruct {
+                    counter: i,
+                    inner_field: vec![Some(SomeEnum::State3)]
+                }),
+                Ok(())
+            );
+        }
+    });
+    let reader_thread = thread::spawn(move || {
+        thread::park();
+        for _ in 0..COUNT {
+            if let Some(val) = reader.read() {
+                assert_eq!(val.inner_field, vec![Some(SomeEnum::State3)]);
+            }
+        }
+    });
+    writer_thread.thread().unpark();
+    reader_thread.thread().unpark();
+    assert!(writer_thread.join().is_ok());
+    assert!(reader_thread.join().is_ok());
+}
+
 #[cfg(not(loom))]
 #[test]
 fn test_tripple_buffer() {
-    generic_test(triple_buffer::triple_buffer());
+    test_multithread(triple_buffer::triple_buffer());
+    test_heapdata(triple_buffer::triple_buffer());
+    test_heapdata_multithread(triple_buffer::triple_buffer());
 }
 
 #[test]
@@ -60,6 +136,8 @@ fn test_tripple_buffer() {
     // loom_rt.max_threads = 2;
     loom_rt.max_branches = 100_000;
     loom_rt.check(|| {
-        generic_test(triple_buffer::triple_buffer());
+        test_multithread(triple_buffer::triple_buffer());
+        test_heapdata(triple_buffer::triple_buffer());
+        test_heapdata_multithread(triple_buffer::triple_buffer());
     });
 }
