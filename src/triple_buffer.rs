@@ -147,17 +147,6 @@ impl<T> Drop for TripleBufferRaw<T> {
 #[cfg(test)]
 mod test {
     use super::*;
-    #[cfg(loom)]
-    use loom::thread;
-    #[cfg(not(loom))]
-    use std::thread;
-
-    #[cfg(loom)]
-    const COUNT: i32 = 4;
-    #[cfg(all(not(loom), not(miri)))]
-    const COUNT: i32 = 10_000;
-    #[cfg(miri)]
-    const COUNT: i32 = 1000;
 
     #[test]
     fn smoke() {
@@ -167,33 +156,11 @@ mod test {
         assert_eq!(r.read(), Some(vec![0; 15]));
     }
 
-    #[cfg(not(loom))]
     #[test]
-    fn test_read_on_writer_multithreaded() {
+    fn test_read_none() {
         let (mut w, mut r) = triple_buffer();
+        assert_eq!(r.read(), None);
         w.write(vec![0; 15]);
         assert_eq!(r.read(), Some(vec![0; 15]));
-        let writer_thread = thread::spawn(move || {
-            thread::park();
-            for i in 0..COUNT {
-                w.write(vec![i; 15]);
-                assert_eq!(w.read(), Some(vec![i; 15]));
-            }
-        });
-        let reader_thread = thread::spawn(move || {
-            thread::park();
-            for _ in 0..COUNT {
-                if let Some(val) = r.read() {
-                    let first_entry = val[0];
-                    for entry in val {
-                        assert_eq!(entry, first_entry);
-                    }
-                }
-            }
-        });
-        writer_thread.thread().unpark();
-        reader_thread.thread().unpark();
-        assert!(writer_thread.join().is_ok());
-        assert!(reader_thread.join().is_ok());
     }
 }

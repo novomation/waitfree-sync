@@ -1,4 +1,4 @@
-use waitfree_sync::triple_buffer::{Reader, Writer};
+use waitfree_sync::{spsc::NoSpaceLeftError, *};
 
 pub trait ReadPrimitive<T> {
     fn read(&mut self) -> Option<T>
@@ -9,7 +9,7 @@ pub trait WritePrimitive<T, E> {
     fn write(&mut self, data: T) -> Result<(), E>;
 }
 
-impl<T> ReadPrimitive<T> for Reader<T> {
+impl<T> ReadPrimitive<T> for triple_buffer::Reader<T> {
     #[inline]
     fn read(&mut self) -> Option<T>
     where
@@ -19,9 +19,25 @@ impl<T> ReadPrimitive<T> for Reader<T> {
     }
 }
 
-impl<T> WritePrimitive<T, ()> for Writer<T> {
+impl<T> WritePrimitive<T, ()> for triple_buffer::Writer<T> {
     fn write(&mut self, data: T) -> Result<(), ()> {
         self.write(data);
         Ok(())
+    }
+}
+
+impl<T> ReadPrimitive<T> for spsc::Reader<T> {
+    #[inline]
+    fn read(&mut self) -> Option<T>
+    where
+        T: Clone,
+    {
+        self.read()
+    }
+}
+
+impl<T> WritePrimitive<T, NoSpaceLeftError<T>> for spsc::Writer<T> {
+    fn write(&mut self, data: T) -> Result<(), NoSpaceLeftError<T>> {
+        self.write(data)
     }
 }

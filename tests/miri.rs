@@ -8,11 +8,11 @@ use std::thread;
 use waitfree_sync::triple_buffer;
 
 #[cfg(loom)]
-const COUNT: i32 = 4;
+const COUNT: usize = 4;
 #[cfg(all(not(loom), not(miri)))]
-const COUNT: i32 = 10_000;
+const COUNT: usize = 16_384;
 #[cfg(miri)]
-const COUNT: i32 = 1000;
+const COUNT: usize = 1024;
 
 type Payload = [i32; 50];
 fn test_multithread<E: PartialEq + Debug>(
@@ -28,7 +28,7 @@ fn test_multithread<E: PartialEq + Debug>(
     let writer_thread = thread::spawn(move || {
         thread::park();
         for i in 0..COUNT {
-            assert_eq!(writer.write([i; 50]), Ok(()));
+            assert_eq!(writer.write([i as i32; 50]), Ok(()));
         }
     });
     let reader_thread = thread::spawn(move || {
@@ -96,7 +96,7 @@ fn test_heapdata_multithread<E: PartialEq + Debug>(
         for i in 0..COUNT {
             assert_eq!(
                 writer.write(SomeStruct {
-                    counter: i,
+                    counter: i as i32,
                     inner_field: vec![Some(SomeEnum::State1)]
                 }),
                 Ok(())
@@ -125,15 +125,36 @@ fn test_tripple_buffer() {
     test_heapdata_multithread(triple_buffer::triple_buffer());
 }
 
+#[cfg(not(loom))]
+#[test]
+fn test_spsc() {
+    use waitfree_sync::spsc;
+
+    test_multithread(spsc::spsc::<_, COUNT>());
+    test_heapdata(spsc::spsc::<_, COUNT>());
+    test_heapdata_multithread(spsc::spsc::<_, COUNT>());
+}
+
 #[test]
 #[cfg(loom)]
 fn test_tripple_buffer() {
     let mut loom_rt = loom::model::Builder::new();
-    // loom_rt.max_threads = 2;
     loom_rt.max_branches = 100_000;
     loom_rt.check(|| {
         test_multithread(triple_buffer::triple_buffer());
         test_heapdata(triple_buffer::triple_buffer());
         test_heapdata_multithread(triple_buffer::triple_buffer());
+    });
+}
+
+#[test]
+#[cfg(loom)]
+fn test_tripple_buffer() {
+    let mut loom_rt = loom::model::Builder::new();
+    loom_rt.max_branches = 100_000;
+    loom_rt.check(|| {
+        test_multithread(spsc::spsc::<_, COUNT>());
+        test_heapdata(spsc::spsc::<_, COUNT>());
+        test_heapdata_multithread(spsc::spsc::<_, COUNT>());
     });
 }
