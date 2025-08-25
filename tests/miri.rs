@@ -1,11 +1,13 @@
-mod common;
 use common::{ReadPrimitive, WritePrimitive};
 #[cfg(loom)]
 use loom::thread;
 use std::fmt::Debug;
 #[cfg(not(loom))]
 use std::thread;
+use waitfree_sync::spsc;
 use waitfree_sync::triple_buffer;
+
+mod common;
 
 #[cfg(loom)]
 const COUNT: usize = 4;
@@ -128,8 +130,6 @@ fn test_tripple_buffer() {
 #[cfg(not(loom))]
 #[test]
 fn test_spsc() {
-    use waitfree_sync::spsc;
-
     test_multithread(spsc::spsc::<_, COUNT>());
     test_heapdata(spsc::spsc::<_, COUNT>());
     test_heapdata_multithread(spsc::spsc::<_, COUNT>());
@@ -137,7 +137,7 @@ fn test_spsc() {
 
 #[test]
 #[cfg(loom)]
-fn test_tripple_buffer() {
+fn loom_tripple_buffer() {
     let mut loom_rt = loom::model::Builder::new();
     loom_rt.max_branches = 100_000;
     loom_rt.check(|| {
@@ -149,7 +149,7 @@ fn test_tripple_buffer() {
 
 #[test]
 #[cfg(loom)]
-fn test_tripple_buffer() {
+fn loom_spsc() {
     let mut loom_rt = loom::model::Builder::new();
     loom_rt.max_branches = 100_000;
     loom_rt.check(|| {
