@@ -116,7 +116,7 @@ impl<T> Writer<T> {
             };
             #[cfg(loom)]
             unsafe {
-                slot.value.get_mut().with(|ptr| ptr.write(data))
+                slot.value.get_mut().with(|ptr| ptr.write(Some(data)))
             };
             slot.occupied.store(true, Ordering::Release);
             self.write += 1;
