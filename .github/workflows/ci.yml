@@ -67,7 +67,7 @@ jobs:
       - name: Install Rust
         run: rustup update stable && rustup default stable
       - name: loom
-        run: RUSTFLAGS="--cfg loom -C debug-assertions"  cargo test --release --tests
+        run: RUSTFLAGS="--cfg loom -C debug-assertions"  cargo test --release loom_
 
   # Minimal dependency versions
   minimal-dependency-versions:
