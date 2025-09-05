@@ -48,6 +48,9 @@ impl<T> Spsc<T> {
             mask: size - 1,
         }
     }
+    fn size(&self) -> usize {
+        self.mask + 1
+    }
 }
 
 #[derive(Debug)]
@@ -86,6 +89,11 @@ impl<T> Reader<T> {
             val
         }
     }
+    pub fn size(&self) -> usize {
+        // SAFETY: This is safe because we only read size which is never written.
+        let spsc = unsafe { &*self.raw_mem.spsc };
+        spsc.size()
+    }
 }
 
 #[derive(Debug)]
@@ -122,6 +130,11 @@ impl<T> Writer<T> {
             self.write += 1;
             Ok(())
         }
+    }
+    pub fn size(&self) -> usize {
+        // SAFETY: This is safe because we only read size which is never written.
+        let spsc = unsafe { &*self.raw_mem.spsc };
+        spsc.size()
     }
 }
 
