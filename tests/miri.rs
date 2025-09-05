@@ -138,11 +138,15 @@ fn test_spsc() {
 #[test]
 #[cfg(loom)]
 fn loom_tripple_buffer() {
-    let mut loom_rt = loom::model::Builder::new();
-    loom_rt.max_branches = 100_000;
-    loom_rt.check(|| {
+    loom::model(|| {
         test_multithread(triple_buffer::triple_buffer());
+    });
+
+    loom::model(|| {
         test_heapdata(triple_buffer::triple_buffer());
+    });
+
+    loom::model(|| {
         test_heapdata_multithread(triple_buffer::triple_buffer());
     });
 }
@@ -150,11 +154,13 @@ fn loom_tripple_buffer() {
 #[test]
 #[cfg(loom)]
 fn loom_spsc() {
-    let mut loom_rt = loom::model::Builder::new();
-    loom_rt.max_branches = 100_000;
-    loom_rt.check(|| {
+    loom::model(|| {
         test_multithread(spsc::spsc::<_, COUNT>());
+    });
+    loom::model(|| {
         test_heapdata(spsc::spsc::<_, COUNT>());
+    });
+    loom::model(|| {
         test_heapdata_multithread(spsc::spsc::<_, COUNT>());
     });
 }
