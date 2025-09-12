@@ -271,4 +271,15 @@ mod test {
         assert_eq!(read.read(), Some(6));
         assert_eq!(read.read(), None);
     }
+
+    #[test]
+    fn test_drop_one_side() {
+        let (mut write, mut read) = spsc::<i32, 4>();
+        drop(read);
+        assert_eq!(write.write(1), Ok(()));
+        assert_eq!(write.write(2), Ok(()));
+        assert_eq!(write.write(3), Ok(()));
+        assert_eq!(write.write(4), Ok(()));
+        assert_eq!(write.write(5), Err(NoSpaceLeftError(5)));
+    }
 }
