@@ -34,15 +34,15 @@ use std::fmt::Debug;
 /// //               Data type ──╮   ╭─ Size
 /// let (tx, rx) = spsc::spsc::<u64>(8);
 /// ```
-pub fn spsc<T>(capacity: usize) -> (Writer<T>, Reader<T>) {
+pub fn spsc<T>(capacity: usize) -> (Sender<T>, Receiver<T>) {
     if !is_power_of_two(capacity) {
         panic!("The SIZE must be a power of 2")
     }
 
     let chan = Arc::new(SpscRaw::new(capacity));
 
-    let r = Reader::new(chan.clone());
-    let w = Writer::new(chan);
+    let r = Receiver::new(chan.clone());
+    let w = Sender::new(chan);
 
     (w, r)
 }
@@ -101,21 +101,21 @@ impl<T> Spsc<T> {
 }
 
 #[derive(Debug)]
-pub struct Reader<T> {
+pub struct Receiver<T> {
     raw_mem: Arc<SpscRaw<T>>,
     read: usize,
 }
-unsafe impl<T: Send> Send for Reader<T> {}
-unsafe impl<T: Send> Sync for Reader<T> {}
+unsafe impl<T: Send> Send for Receiver<T> {}
+unsafe impl<T: Send> Sync for Receiver<T> {}
 
-impl<T> Reader<T> {
+impl<T> Receiver<T> {
     fn new(raw_mem: Arc<SpscRaw<T>>) -> Self {
-        Reader { raw_mem, read: 0 }
+        Receiver { raw_mem, read: 0 }
     }
 }
 
-impl<T> Reader<T> {
-    pub fn read(&mut self) -> Option<T> {
+impl<T> Receiver<T> {
+    pub fn try_recv(&mut self) -> Option<T> {
         let spsc = unsafe { &*self.raw_mem.spsc };
         let rpos = self.read & spsc.mask;
         let slot = unsafe { spsc.mem.get_unchecked(rpos) };
@@ -144,20 +144,20 @@ impl<T> Reader<T> {
 }
 
 #[derive(Debug)]
-pub struct Writer<T> {
+pub struct Sender<T> {
     raw_mem: Arc<SpscRaw<T>>,
     write: usize,
 }
-unsafe impl<T: Send> Send for Writer<T> {}
-unsafe impl<T: Send> Sync for Writer<T> {}
-impl<T> Writer<T> {
+unsafe impl<T: Send> Send for Sender<T> {}
+unsafe impl<T: Send> Sync for Sender<T> {}
+impl<T> Sender<T> {
     fn new(raw_mem: Arc<SpscRaw<T>>) -> Self {
-        Writer { raw_mem, write: 0 }
+        Sender { raw_mem, write: 0 }
     }
 }
 
-impl<T> Writer<T> {
-    pub fn write(&mut self, data: T) -> Result<(), NoSpaceLeftError<T>> {
+impl<T> Sender<T> {
+    pub fn try_send(&mut self, data: T) -> Result<(), NoSpaceLeftError<T>> {
         let spsc = unsafe { &*self.raw_mem.spsc };
         let wpos = self.write & spsc.mask;
 
@@ -219,15 +219,15 @@ mod test {
     #[test]
     fn smoke() {
         let (mut w, mut r) = spsc(4);
-        w.write(vec![0; 15]).unwrap();
-        w.write(vec![0; 16]).unwrap();
-        w.write(vec![0; 17]).unwrap();
-        w.write(vec![0; 18]).unwrap();
+        w.try_send(vec![0; 15]).unwrap();
+        w.try_send(vec![0; 16]).unwrap();
+        w.try_send(vec![0; 17]).unwrap();
+        w.try_send(vec![0; 18]).unwrap();
 
-        assert_eq!(r.read(), Some(vec![0; 15]));
-        assert_eq!(r.read(), Some(vec![0; 16]));
-        assert_eq!(r.read(), Some(vec![0; 17]));
-        assert_eq!(r.read(), Some(vec![0; 18]));
+        assert_eq!(r.try_recv(), Some(vec![0; 15]));
+        assert_eq!(r.try_recv(), Some(vec![0; 16]));
+        assert_eq!(r.try_recv(), Some(vec![0; 17]));
+        assert_eq!(r.try_recv(), Some(vec![0; 18]));
     }
 
     #[test]
@@ -255,28 +255,28 @@ mod test {
     #[test]
     fn test_full_empty() {
         let (mut write, mut read) = spsc::<i32>(4);
-        assert_eq!(write.write(1), Ok(()));
-        assert_eq!(write.write(2), Ok(()));
-        assert_eq!(write.write(3), Ok(()));
-        assert_eq!(write.write(4), Ok(()));
-        assert_eq!(write.write(5), Err(NoSpaceLeftError(5)));
-        assert_eq!(read.read(), Some(1));
-        assert_eq!(write.write(6), Ok(()));
-        assert_eq!(read.read(), Some(2));
-        assert_eq!(read.read(), Some(3));
-        assert_eq!(read.read(), Some(4));
-        assert_eq!(read.read(), Some(6));
-        assert_eq!(read.read(), None);
+        assert_eq!(write.try_send(1), Ok(()));
+        assert_eq!(write.try_send(2), Ok(()));
+        assert_eq!(write.try_send(3), Ok(()));
+        assert_eq!(write.try_send(4), Ok(()));
+        assert_eq!(write.try_send(5), Err(NoSpaceLeftError(5)));
+        assert_eq!(read.try_recv(), Some(1));
+        assert_eq!(write.try_send(6), Ok(()));
+        assert_eq!(read.try_recv(), Some(2));
+        assert_eq!(read.try_recv(), Some(3));
+        assert_eq!(read.try_recv(), Some(4));
+        assert_eq!(read.try_recv(), Some(6));
+        assert_eq!(read.try_recv(), None);
     }
 
     #[test]
     fn test_drop_one_side() {
         let (mut write, read) = spsc::<i32>(4);
         drop(read);
-        assert_eq!(write.write(1), Ok(()));
-        assert_eq!(write.write(2), Ok(()));
-        assert_eq!(write.write(3), Ok(()));
-        assert_eq!(write.write(4), Ok(()));
-        assert_eq!(write.write(5), Err(NoSpaceLeftError(5)));
+        assert_eq!(write.try_send(1), Ok(()));
+        assert_eq!(write.try_send(2), Ok(()));
+        assert_eq!(write.try_send(3), Ok(()));
+        assert_eq!(write.try_send(4), Ok(()));
+        assert_eq!(write.try_send(5), Err(NoSpaceLeftError(5)));
     }
 }

@@ -15,7 +15,7 @@ impl<T> ReadPrimitive<T> for triple_buffer::Reader<T> {
     where
         T: Clone,
     {
-        self.read()
+        self.try_read()
     }
 }
 
@@ -26,18 +26,18 @@ impl<T> WritePrimitive<T, ()> for triple_buffer::Writer<T> {
     }
 }
 
-impl<T> ReadPrimitive<T> for spsc::Reader<T> {
+impl<T> ReadPrimitive<T> for spsc::Receiver<T> {
     #[inline]
     fn read(&mut self) -> Option<T>
     where
         T: Clone,
     {
-        self.read()
+        self.try_recv()
     }
 }
 
-impl<T> WritePrimitive<T, NoSpaceLeftError<T>> for spsc::Writer<T> {
+impl<T> WritePrimitive<T, NoSpaceLeftError<T>> for spsc::Sender<T> {
     fn write(&mut self, data: T) -> Result<(), NoSpaceLeftError<T>> {
-        self.write(data)
+        self.try_send(data)
     }
 }

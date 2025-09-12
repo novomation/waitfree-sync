@@ -49,7 +49,7 @@ impl<T> Reader<T> {
     }
 
     #[inline]
-    pub fn read(&mut self) -> Option<T>
+    pub fn try_read(&mut self) -> Option<T>
     where
         T: Clone,
     {
@@ -86,7 +86,7 @@ impl<T> Writer<T> {
     }
 
     #[inline]
-    pub fn read(&mut self) -> Option<T>
+    pub fn try_read(&mut self) -> Option<T>
     where
         T: Clone,
     {
@@ -153,15 +153,15 @@ mod test {
     fn smoke() {
         let (mut w, mut r) = triple_buffer();
         w.write(vec![0; 15]);
-        assert_eq!(w.read(), Some(vec![0; 15]));
-        assert_eq!(r.read(), Some(vec![0; 15]));
+        assert_eq!(w.try_read(), Some(vec![0; 15]));
+        assert_eq!(r.try_read(), Some(vec![0; 15]));
     }
 
     #[test]
     fn test_read_none() {
         let (mut w, mut r) = triple_buffer();
-        assert_eq!(r.read(), None);
+        assert_eq!(r.try_read(), None);
         w.write(vec![0; 15]);
-        assert_eq!(r.read(), Some(vec![0; 15]));
+        assert_eq!(r.try_read(), Some(vec![0; 15]));
     }
 }
