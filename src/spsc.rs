@@ -12,8 +12,8 @@
 //! ```
 //!
 //! # Behaviour for full and empty queue.
-//! If the queue is full the [Writer] returns an [NoSpaceLeftError]
-//! If the queue is empty the [Reader] returns `None`
+//! If the queue is full the [Sender] returns an [NoSpaceLeftError]
+//! If the queue is empty the [Receiver] returns `None`
 //!
 //! # Behaviuor on drop
 //!
