@@ -25,24 +25,21 @@ use core::error::Error;
 use crossbeam_utils::CachePadded;
 use std::fmt::Debug;
 
-/// Create a new wait-free SPSC queue. The size must be a power of two and is validate during compile time.
-/// Therefore you have to provide the size as const generic.
-///
+/// Create a new wait-free SPSC queue. The size must be a power of two and is validate during runtime.
+/// ///
 /// # Example
 /// ```rust
 /// use waitfree_sync::spsc;
 ///
-/// //                    Type ──╮  ╭─ Size
-/// let (tx, rx) = spsc::spsc::<u64,8>();
+/// //               Data type ──╮   ╭─ Size
+/// let (tx, rx) = spsc::spsc::<u64>(8);
 /// ```
-pub fn spsc<T, const SIZE: usize>() -> (Writer<T>, Reader<T>) {
-    const {
-        if !is_power_of_two(SIZE) {
-            panic!("The SIZE must be a power of 2")
-        }
-    };
+pub fn spsc<T>(capacity: usize) -> (Writer<T>, Reader<T>) {
+    if !is_power_of_two(capacity) {
+        panic!("The SIZE must be a power of 2")
+    }
 
-    let chan = Arc::new(SpscRaw::new(SIZE));
+    let chan = Arc::new(SpscRaw::new(capacity));
 
     let r = Reader::new(chan.clone());
     let w = Writer::new(chan);
@@ -221,7 +218,7 @@ mod test {
 
     #[test]
     fn smoke() {
-        let (mut w, mut r) = spsc::<_, 4>();
+        let (mut w, mut r) = spsc(4);
         w.write(vec![0; 15]).unwrap();
         w.write(vec![0; 16]).unwrap();
         w.write(vec![0; 17]).unwrap();
@@ -257,7 +254,7 @@ mod test {
 
     #[test]
     fn test_full_empty() {
-        let (mut write, mut read) = spsc::<i32, 4>();
+        let (mut write, mut read) = spsc::<i32>(4);
         assert_eq!(write.write(1), Ok(()));
         assert_eq!(write.write(2), Ok(()));
         assert_eq!(write.write(3), Ok(()));
@@ -274,7 +271,7 @@ mod test {
 
     #[test]
     fn test_drop_one_side() {
-        let (mut write, read) = spsc::<i32, 4>();
+        let (mut write, read) = spsc::<i32>(4);
         drop(read);
         assert_eq!(write.write(1), Ok(()));
         assert_eq!(write.write(2), Ok(()));

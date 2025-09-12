@@ -130,9 +130,9 @@ fn test_tripple_buffer() {
 #[cfg(not(loom))]
 #[test]
 fn test_spsc() {
-    test_multithread(spsc::spsc::<_, COUNT>());
-    test_heapdata(spsc::spsc::<_, COUNT>());
-    test_heapdata_multithread(spsc::spsc::<_, COUNT>());
+    test_multithread(spsc::spsc(COUNT));
+    test_heapdata(spsc::spsc(COUNT));
+    test_heapdata_multithread(spsc::spsc(COUNT));
 }
 
 #[test]
