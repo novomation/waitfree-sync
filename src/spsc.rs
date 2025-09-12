@@ -1,4 +1,22 @@
-//! Wait-free single producer single consumer queue based on the improved FastForward queue
+//! Wait-free single-producer single-consumer (SPSC) queue to send data to another thread.
+//! Based on the improved FastForward queue.
+//!
+//! # Example
+//! ```rust
+//! use waitfree_sync::spsc;
+//!
+//! //                            Type ──╮  ╭─ Size
+//! let (mut tx, mut rx) = spsc::spsc::<u64,8>();
+//! tx.write(234);
+//! assert_eq!(rx.read(),Some(234u64));
+//! ```
+//!
+//! # Behaviour for full and empty queue.
+//! If the queue is full the [Writer] returns an [NoSpaceLeftError]
+//! If the queue is empty the [Reader] returns `None`
+//!
+//! # Behaviuor on drop
+//!
 use crate::{
     import::{Arc, AtomicBool, Ordering, UnsafeCell},
     // EnqeueueError, ReadPrimitive, WritePrimitive,
@@ -6,6 +24,36 @@ use crate::{
 use core::error::Error;
 use crossbeam_utils::CachePadded;
 use std::fmt::Debug;
+
+/// Create a new wait-free SPSC queue. The size must be a power of two and is validate during compile time.
+/// Therefore you have to provide the size as const generic.
+///
+/// # Example
+/// ```rust
+/// use waitfree_sync::spsc;
+///
+/// //                    Type ──╮  ╭─ Size
+/// let (tx, rx) = spsc::spsc::<u64,8>();
+/// ```
+pub fn spsc<T, const SIZE: usize>() -> (Writer<T>, Reader<T>) {
+    const {
+        if !is_power_of_two(SIZE) {
+            panic!("The SIZE must be a power of 2")
+        }
+    };
+
+    let chan = Arc::new(SpscRaw::new(SIZE));
+
+    let r = Reader::new(chan.clone());
+    let w = Writer::new(chan);
+
+    (w, r)
+}
+
+const fn is_power_of_two(x: usize) -> bool {
+    let c = x.wrapping_sub(1);
+    (x != 0) && (x != 1) && ((x & c) == 0)
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct NoSpaceLeftError<T>(T);
@@ -33,6 +81,8 @@ impl<T> Slot<T> {
 #[derive(Debug)]
 struct Spsc<T: Sized> {
     mem: Box<[Slot<T>]>,
+    // The mask is written when this structure is created and is then only read.
+    // Therefore, we do not need Atomic here.
     mask: usize,
 }
 
@@ -136,25 +186,6 @@ impl<T> Writer<T> {
         let spsc = unsafe { &*self.raw_mem.spsc };
         spsc.size()
     }
-}
-
-const fn is_power_of_two(x: usize) -> bool {
-    let c = x.wrapping_sub(1);
-    (x != 0) && (x != 1) && ((x & c) == 0)
-}
-
-pub fn spsc<T, const SIZE: usize>() -> (Writer<T>, Reader<T>) {
-    const {
-        if !is_power_of_two(SIZE) {
-            panic!("The SIZE must be a power of 2")
-        }
-    };
-
-    let chan = Arc::new(SpscRaw::new(SIZE));
-
-    let r = Reader::new(chan.clone());
-    let w = Writer::new(chan);
-    (w, r)
 }
 
 /// Wrapper around a raw pointer `slot` to a [Slot] to enable manually memory management

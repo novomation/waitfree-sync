@@ -1,3 +1,4 @@
+//! Wait-free single-producer single-consumer (SPSC) triple buffer to share data between two threads.
 use crate::import::{Arc, AtomicUsize, Ordering, UnsafeCell};
 use crossbeam_utils::CachePadded;
 

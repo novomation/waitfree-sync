@@ -1,3 +1,4 @@
+//!
 #[cfg(loom)]
 mod import {
     pub(crate) use loom::cell::UnsafeCell;
