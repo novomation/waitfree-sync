@@ -274,7 +274,7 @@ mod test {
 
     #[test]
     fn test_drop_one_side() {
-        let (mut write, mut read) = spsc::<i32, 4>();
+        let (mut write, read) = spsc::<i32, 4>();
         drop(read);
         assert_eq!(write.write(1), Ok(()));
         assert_eq!(write.write(2), Ok(()));
