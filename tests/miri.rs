@@ -155,12 +155,12 @@ fn loom_tripple_buffer() {
 #[cfg(loom)]
 fn loom_spsc() {
     loom::model(|| {
-        test_multithread(spsc::spsc::<_, COUNT>());
+        test_multithread(spsc::spsc(COUNT));
     });
     loom::model(|| {
-        test_heapdata(spsc::spsc::<_, COUNT>());
+        test_heapdata(spsc::spsc(COUNT));
     });
     loom::model(|| {
-        test_heapdata_multithread(spsc::spsc::<_, COUNT>());
+        test_heapdata_multithread(spsc::spsc(COUNT));
     });
 }

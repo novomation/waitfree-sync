@@ -5,10 +5,10 @@
 //! ```rust
 //! use waitfree_sync::spsc;
 //!
-//! //                            Type ──╮  ╭─ Size
-//! let (mut tx, mut rx) = spsc::spsc::<u64,8>();
-//! tx.write(234);
-//! assert_eq!(rx.read(),Some(234u64));
+//! //                            Type ──╮   ╭─ Size
+//! let (mut tx, mut rx) = spsc::spsc::<u64>(8);
+//! tx.try_send(234);
+//! assert_eq!(rx.try_recv(),Some(234u64));
 //! ```
 //!
 //! # Behaviour for full and empty queue.
