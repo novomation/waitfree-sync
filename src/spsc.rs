@@ -39,7 +39,7 @@ pub fn spsc<T>(capacity: usize) -> (Sender<T>, Receiver<T>) {
         panic!("The SIZE must be a power of 2")
     }
 
-    let chan = Arc::new(SpscRaw::new(capacity));
+    let chan = Arc::new(Spsc::new(capacity));
 
     let r = Receiver::new(chan.clone());
     let w = Sender::new(chan);
@@ -102,23 +102,22 @@ impl<T> Spsc<T> {
 
 #[derive(Debug)]
 pub struct Receiver<T> {
-    raw_mem: Arc<SpscRaw<T>>,
+    spsc: Arc<Spsc<T>>,
     read: usize,
 }
 unsafe impl<T: Send> Send for Receiver<T> {}
 unsafe impl<T: Send> Sync for Receiver<T> {}
 
 impl<T> Receiver<T> {
-    fn new(raw_mem: Arc<SpscRaw<T>>) -> Self {
-        Receiver { raw_mem, read: 0 }
+    fn new(spsc: Arc<Spsc<T>>) -> Self {
+        Receiver { spsc, read: 0 }
     }
 }
 
 impl<T> Receiver<T> {
     pub fn try_recv(&mut self) -> Option<T> {
-        let spsc = unsafe { &*self.raw_mem.spsc };
-        let rpos = self.read & spsc.mask;
-        let slot = unsafe { spsc.mem.get_unchecked(rpos) };
+        let rpos = self.read & self.spsc.mask;
+        let slot = unsafe { self.spsc.mem.get_unchecked(rpos) };
         if !slot.occupied.load(Ordering::Acquire) {
             None
         } else {
@@ -138,30 +137,28 @@ impl<T> Receiver<T> {
     }
     pub fn size(&self) -> usize {
         // SAFETY: This is safe because we only read size which is never written.
-        let spsc = unsafe { &*self.raw_mem.spsc };
-        spsc.size()
+        self.spsc.size()
     }
 }
 
 #[derive(Debug)]
 pub struct Sender<T> {
-    raw_mem: Arc<SpscRaw<T>>,
+    spsc: Arc<Spsc<T>>,
     write: usize,
 }
 unsafe impl<T: Send> Send for Sender<T> {}
 unsafe impl<T: Send> Sync for Sender<T> {}
 impl<T> Sender<T> {
-    fn new(raw_mem: Arc<SpscRaw<T>>) -> Self {
-        Sender { raw_mem, write: 0 }
+    fn new(spsc: Arc<Spsc<T>>) -> Self {
+        Sender { spsc, write: 0 }
     }
 }
 
 impl<T> Sender<T> {
     pub fn try_send(&mut self, data: T) -> Result<(), NoSpaceLeftError<T>> {
-        let spsc = unsafe { &*self.raw_mem.spsc };
-        let wpos = self.write & spsc.mask;
+        let wpos = self.write & self.spsc.mask;
 
-        let slot = unsafe { spsc.mem.get_unchecked(wpos) };
+        let slot = unsafe { self.spsc.mem.get_unchecked(wpos) };
         if slot.occupied.load(Ordering::Acquire) {
             Err(NoSpaceLeftError(data))
         } else {
@@ -180,34 +177,7 @@ impl<T> Sender<T> {
     }
     pub fn size(&self) -> usize {
         // SAFETY: This is safe because we only read size which is never written.
-        let spsc = unsafe { &*self.raw_mem.spsc };
-        spsc.size()
-    }
-}
-
-/// Wrapper around a raw pointer `slot` to a [Slot] to enable manually memory management
-#[derive(Debug)]
-struct SpscRaw<T> {
-    /// Raw pointer to a [Slot]
-    spsc: *mut Spsc<T>,
-}
-
-impl<T> SpscRaw<T> {
-    fn new(size: usize) -> Self {
-        // Allocate a buffer of `cap` slots initialized
-        // with stamps.
-        let mem = Box::new(Spsc::new(size));
-        // We leak the Slot here to manage the memory our self.
-        // The leaked memory is dropped in the Drop impl
-        let ptr = Box::leak(mem);
-        Self { spsc: ptr }
-    }
-}
-
-impl<T> Drop for SpscRaw<T> {
-    fn drop(&mut self) {
-        // This is required to drop the memory allocated in [WriteRingBufferRaw<T>::new()]
-        unsafe { drop(Box::from_raw(self.spsc)) };
+        self.spsc.size()
     }
 }
 

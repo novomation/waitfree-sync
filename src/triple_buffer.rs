@@ -6,14 +6,14 @@ const NEW_DATA_FLAG: usize = 0b100;
 const INDEX_MASK: usize = 0b011;
 
 #[derive(Debug)]
-struct Slot<T: Sized> {
+struct Shared<T: Sized> {
     mem: [UnsafeCell<Option<T>>; 3],
     latest_free: CachePadded<AtomicUsize>,
 }
 
-impl<T> Slot<T> {
+impl<T> Shared<T> {
     fn new() -> Self {
-        Slot {
+        Shared {
             mem: [
                 UnsafeCell::new(None),
                 UnsafeCell::new(None),
@@ -25,7 +25,7 @@ impl<T> Slot<T> {
 }
 
 pub fn triple_buffer<T>() -> (Writer<T>, Reader<T>) {
-    let chan = Arc::new(TripleBufferRaw::new());
+    let chan = Arc::new(Shared::new());
 
     let w = Writer::new(chan.clone());
     let r = Reader::new(chan);
@@ -34,16 +34,16 @@ pub fn triple_buffer<T>() -> (Writer<T>, Reader<T>) {
 
 #[derive(Debug)]
 pub struct Reader<T> {
-    raw_mem: Arc<TripleBufferRaw<T>>,
+    shared: Arc<Shared<T>>,
     read_idx: usize,
 }
 unsafe impl<T: Send> Send for Reader<T> {}
 unsafe impl<T: Send> Sync for Reader<T> {}
 
 impl<T> Reader<T> {
-    fn new(raw_mem: Arc<TripleBufferRaw<T>>) -> Self {
+    fn new(raw_mem: Arc<Shared<T>>) -> Self {
         Reader {
-            raw_mem,
+            shared: raw_mem,
             read_idx: 1,
         }
     }
@@ -53,23 +53,26 @@ impl<T> Reader<T> {
     where
         T: Clone,
     {
-        let slot = unsafe { &*self.raw_mem.slot };
-        let has_new_data = slot.latest_free.load(Ordering::Acquire) & NEW_DATA_FLAG > 0;
+        let has_new_data = self.shared.latest_free.load(Ordering::Acquire) & NEW_DATA_FLAG > 0;
         if has_new_data {
-            self.read_idx = slot.latest_free.swap(self.read_idx, Ordering::AcqRel) & INDEX_MASK;
+            self.read_idx = self
+                .shared
+                .latest_free
+                .swap(self.read_idx, Ordering::AcqRel)
+                & INDEX_MASK;
         }
 
         #[cfg(loom)]
-        let val = unsafe { slot.mem[self.read_idx].get().deref() }.clone();
+        let val = unsafe { self.shared.mem[self.read_idx].get().deref() }.clone();
         #[cfg(not(loom))]
-        let val = unsafe { &*slot.mem[self.read_idx].get() }.clone();
+        let val = unsafe { &*self.shared.mem[self.read_idx].get() }.clone();
         val
     }
 }
 
 #[derive(Debug)]
 pub struct Writer<T> {
-    raw_mem: Arc<TripleBufferRaw<T>>,
+    shared: Arc<Shared<T>>,
     write_idx: usize,
     last_written: Option<usize>,
 }
@@ -77,9 +80,9 @@ unsafe impl<T: Send> Send for Writer<T> {}
 unsafe impl<T: Send> Sync for Writer<T> {}
 
 impl<T> Writer<T> {
-    fn new(raw_mem: Arc<TripleBufferRaw<T>>) -> Self {
+    fn new(raw_mem: Arc<Shared<T>>) -> Self {
         Writer {
-            raw_mem,
+            shared: raw_mem,
             write_idx: 2,
             last_written: None,
         }
@@ -91,57 +94,38 @@ impl<T> Writer<T> {
         T: Clone,
     {
         let last_written = self.last_written?;
-        let slot = unsafe { &*self.raw_mem.slot };
 
         #[cfg(loom)]
-        let val = unsafe { slot.mem[last_written].get().deref() }.clone();
+        let val = unsafe { self.shared.mem[last_written].get().deref() }.clone();
         #[cfg(not(loom))]
-        let val = unsafe { &*slot.mem[last_written].get() }.clone();
+        let val = unsafe { &*self.shared.mem[last_written].get() }.clone();
         val
     }
 
     #[inline]
     pub fn write(&mut self, data: T) {
-        let slot = unsafe { &*self.raw_mem.slot };
-
         #[cfg(loom)]
         unsafe {
-            let _ = (*slot.mem[self.write_idx & INDEX_MASK].get_mut().deref()).insert(data);
+            let old = (*self.shared.mem[self.write_idx & INDEX_MASK]
+                .get_mut()
+                .deref())
+            .insert(data);
         };
         #[cfg(not(loom))]
-        unsafe {
-            // Drop old value and write new one
-            let _ = (*slot.mem[self.write_idx & INDEX_MASK].get()).insert(data);
+        // Drop old value and write new one
+        let old = unsafe {
+            self.shared.mem[self.write_idx & INDEX_MASK]
+                .get()
+                .replace(Some(data))
         };
+        drop(old);
+
         // Store index
         self.last_written = Some(self.write_idx & INDEX_MASK);
-        self.write_idx = slot
+        self.write_idx = self
+            .shared
             .latest_free
             .swap(self.write_idx | NEW_DATA_FLAG, Ordering::AcqRel);
-    }
-}
-
-/// Wrapper around a raw pointer `slot` to a [Slot] to enable manually memory management
-#[derive(Debug)]
-struct TripleBufferRaw<T: Sized> {
-    /// Raw pointer to a [Slot]
-    slot: *mut Slot<T>,
-}
-
-impl<T> TripleBufferRaw<T> {
-    fn new() -> TripleBufferRaw<T> {
-        let mem = Box::new(Slot::new());
-        // We leak the Slot here to manage the memory our self.
-        // The leaked memory is dropped in the Drop impl
-        let ptr = Box::leak(mem);
-        TripleBufferRaw { slot: ptr }
-    }
-}
-
-impl<T> Drop for TripleBufferRaw<T> {
-    fn drop(&mut self) {
-        // This is required to drop the memory allocated in [TripleBufferRaw<T>::new()]
-        unsafe { drop(Box::from_raw(self.slot)) };
     }
 }
 
@@ -153,6 +137,7 @@ mod test {
     fn smoke() {
         let (mut w, mut r) = triple_buffer();
         w.write(vec![0; 15]);
+
         assert_eq!(w.try_read(), Some(vec![0; 15]));
         assert_eq!(r.try_read(), Some(vec![0; 15]));
     }
