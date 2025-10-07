@@ -62,7 +62,7 @@ impl<T> core::fmt::Display for NoSpaceLeftError<T> {
 }
 
 #[derive(Debug)]
-struct Slot<T: Sized> {
+struct Slot<T> {
     value: UnsafeCell<Option<T>>,
     occupied: CachePadded<AtomicBool>,
 }
@@ -76,7 +76,7 @@ impl<T> Slot<T> {
 }
 
 #[derive(Debug)]
-struct Spsc<T: Sized> {
+struct Spsc<T> {
     mem: Box<[Slot<T>]>,
     // The mask is written when this structure is created and is then only read.
     // Therefore, we do not need Atomic here.
@@ -187,7 +187,7 @@ impl<T> Sender<T> {
 
 /// Wrapper around a raw pointer `slot` to a [Slot] to enable manually memory management
 #[derive(Debug)]
-struct SpscRaw<T: Sized> {
+struct SpscRaw<T> {
     /// Raw pointer to a [Slot]
     spsc: *mut Spsc<T>,
 }
