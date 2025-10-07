@@ -124,11 +124,7 @@ impl<T> Receiver<T> {
             #[cfg(not(loom))]
             let val = unsafe { slot.value.get().replace(None) };
             #[cfg(loom)]
-            let val = unsafe {
-                slot.value
-                    .get_mut()
-                    .with(|ptr| ptr.replace(std::mem::zeroed()))
-            };
+            let val = unsafe { slot.value.get_mut().with(|ptr| ptr.replace(None)) };
 
             slot.occupied.store(false, Ordering::Release);
             self.read += 1;
@@ -136,16 +132,14 @@ impl<T> Receiver<T> {
         }
     }
     /// Peeks the next element in the queue withou removing it.
+    #[cfg(not(loom))] // We can't return a reference to an UnsafeCell of loom.
     pub fn peek(&self) -> Option<&T> {
         let rpos = self.read & self.spsc.mask;
         let slot = unsafe { self.spsc.mem.get_unchecked(rpos) };
         if !slot.occupied.load(Ordering::Acquire) {
             None
         } else {
-            #[cfg(not(loom))]
             let val = unsafe { &*slot.value.get() };
-            #[cfg(loom)]
-            let val = unsafe { slot.value.get().deref() };
             val.as_ref()
         }
     }

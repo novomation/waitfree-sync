@@ -105,20 +105,20 @@ impl<T> Writer<T> {
     #[inline]
     pub fn write(&mut self, data: T) {
         #[cfg(loom)]
-        let old = unsafe {
-            (*self.shared.mem[self.write_idx & INDEX_MASK]
+        unsafe {
+            self.shared.mem[self.write_idx & INDEX_MASK]
                 .get_mut()
-                .deref())
-            .insert(data)
-        };
+                .with(|ptr| {
+                    let _ = ptr.replace(Some(data));
+                });
+        }
         #[cfg(not(loom))]
         // Drop old value and write new one
-        let old = unsafe {
+        let _ = unsafe {
             self.shared.mem[self.write_idx & INDEX_MASK]
                 .get()
                 .replace(Some(data))
         };
-        drop(old);
 
         // Store index
         self.last_written = Some(self.write_idx & INDEX_MASK);
