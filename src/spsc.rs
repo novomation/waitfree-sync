@@ -135,6 +135,20 @@ impl<T> Receiver<T> {
             val
         }
     }
+    /// Peeks the next element in the queue withou removing it.
+    pub fn peek(&self) -> Option<&T> {
+        let rpos = self.read & self.spsc.mask;
+        let slot = unsafe { self.spsc.mem.get_unchecked(rpos) };
+        if !slot.occupied.load(Ordering::Acquire) {
+            None
+        } else {
+            #[cfg(not(loom))]
+            let val = unsafe { &*slot.value.get() };
+            #[cfg(loom)]
+            let val = unsafe { slot.value.get().deref() };
+            val.as_ref()
+        }
+    }
     pub fn size(&self) -> usize {
         // SAFETY: This is safe because we only read size which is never written.
         self.spsc.size()
@@ -184,6 +198,11 @@ impl<T> Sender<T> {
 #[cfg(not(loom))]
 #[cfg(test)]
 mod test {
+    #[cfg(loom)]
+    use loom::thread;
+    #[cfg(not(loom))]
+    use std::thread;
+
     use super::*;
 
     #[test]
@@ -248,5 +267,58 @@ mod test {
         assert_eq!(write.try_send(3), Ok(()));
         assert_eq!(write.try_send(4), Ok(()));
         assert_eq!(write.try_send(5), Err(NoSpaceLeftError(5)));
+    }
+
+    #[test]
+    fn test_peek() {
+        let (mut w, mut r) = spsc(4);
+        w.try_send(vec![0; 15]).unwrap();
+        w.try_send(vec![0; 16]).unwrap();
+        w.try_send(vec![0; 17]).unwrap();
+        w.try_send(vec![0; 18]).unwrap();
+
+        assert_eq!(r.peek(), Some(&vec![0; 15]));
+        assert_eq!(r.try_recv(), Some(vec![0; 15]));
+        assert_eq!(r.peek(), Some(&vec![0; 16]));
+        assert_eq!(r.try_recv(), Some(vec![0; 16]));
+        assert_eq!(r.peek(), Some(&vec![0; 17]));
+        assert_eq!(r.try_recv(), Some(vec![0; 17]));
+        assert_eq!(r.peek(), Some(&vec![0; 18]));
+        assert_eq!(r.peek(), Some(&vec![0; 18]));
+        assert_eq!(r.peek(), Some(&vec![0; 18]));
+        assert_eq!(r.try_recv(), Some(vec![0; 18]));
+        assert_eq!(r.peek(), None);
+    }
+
+    #[test]
+    fn test_peek_threaded() {
+        let (mut sender, mut receiver) = spsc(4);
+
+        let writer_thread = thread::spawn(move || {
+            thread::park();
+            for i in 0..4 {
+                assert_eq!(sender.try_send([i; 50]), Ok(()));
+            }
+        });
+        let reader_thread = thread::spawn(move || {
+            thread::park();
+            for _ in 0..4 {
+                if let Some(val) = receiver.peek() {
+                    let first_entry = val[0];
+                    for entry in val {
+                        assert_eq!(*entry, first_entry);
+                    }
+                    let val = receiver.try_recv().unwrap();
+                    let first_entry = val[0];
+                    for entry in val {
+                        assert_eq!(entry, first_entry);
+                    }
+                }
+            }
+        });
+        writer_thread.thread().unpark();
+        reader_thread.thread().unpark();
+        assert!(writer_thread.join().is_ok());
+        assert!(reader_thread.join().is_ok());
     }
 }
