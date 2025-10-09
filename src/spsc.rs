@@ -95,7 +95,9 @@ impl<T> Spsc<T> {
             mask: size - 1,
         }
     }
-    fn size(&self) -> usize {
+
+    #[inline]
+    fn capacity(&self) -> usize {
         self.mask + 1
     }
 }
@@ -143,9 +145,11 @@ impl<T> Receiver<T> {
             val.as_ref()
         }
     }
-    pub fn size(&self) -> usize {
+
+    #[inline]
+    pub fn capacity(&self) -> usize {
         // SAFETY: This is safe because we only read size which is never written.
-        self.spsc.size()
+        self.spsc.capacity()
     }
 }
 
@@ -183,9 +187,11 @@ impl<T> Sender<T> {
             Ok(())
         }
     }
-    pub fn size(&self) -> usize {
+
+    #[inline]
+    pub fn capacity(&self) -> usize {
         // SAFETY: This is safe because we only read size which is never written.
-        self.spsc.size()
+        self.spsc.capacity()
     }
 }
 
