@@ -1,5 +1,8 @@
 # Wait-free synchronization primitives
 
+[![Crates.io](https://img.shields.io/crates/v/waitfree_sync.svg)](https://crates.io/crates/waitfree_sync)
+[![Documentation](https://docs.rs/waitfree-sync/badge.svg)](
+https://docs.rs/waitfree_sync)
 [![CI](https://github.com/novomation/waitfree-sync/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/novomation/waitfree-sync/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT_OR_Apache--2.0-blue.svg)](
 https://github.com/novomation/waitfree-sync#license)
