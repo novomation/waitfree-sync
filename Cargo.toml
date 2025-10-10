@@ -8,6 +8,7 @@ repository = "https://github.com/novomation/waitfree-sync"
 homepage = "https://github.com/novomation/waitfree-sync"
 authors = ["Marc Fischer"]
 readme = "Readme.md"
+exclude = [".github/*"]
 
 [dependencies]
 crossbeam-utils = "0.8"
