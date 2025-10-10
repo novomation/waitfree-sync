@@ -23,13 +23,11 @@ A wait-free triple buffer for single-producer, single-consumer scenarios.
 ```rust
 use waitfree_sync::triple_buffer;
 
-fn main() {
-    let (mut wr, mut rd) = triple_buffer::triple_buffer();
+let (mut wr, mut rd) = triple_buffer::triple_buffer();
 
-    wr.write(42);
-    assert_eq!(wr.try_read(), Some(42));
-    assert_eq!(rd.try_read(), Some(42));
-}
+wr.write(42);
+assert_eq!(wr.try_read(), Some(42));
+assert_eq!(rd.try_read(), Some(42));
 ```
 
 ## SPSC Queue
@@ -39,12 +37,10 @@ A wait-free single-producer, single-consumer queue.
 ```rust
 use waitfree_sync::spsc;
 
-fn main() {
-    let (tx, rx) = spsc::spsc(8);
+let (mut tx, mut rx) = spsc::spsc(8);
 
-    tx.try_send("hello").unwrap();
-    assert_eq!(rx.try_recv(), Some("hello"));
-}
+tx.try_send("hello").unwrap();
+assert_eq!(rx.try_recv(), Some("hello"));
 ```
 
 ## Features
