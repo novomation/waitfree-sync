@@ -1,6 +1,6 @@
 [package]
 name = "waitfree-sync"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 rust-version = "1.66"
 license = "MIT OR Apache-2.0"
@@ -9,6 +9,9 @@ homepage = "https://github.com/novomation/waitfree-sync"
 authors = ["Marc Fischer"]
 readme = "Readme.md"
 exclude = [".github/*"]
+description = "A collection of wait-free data structures"
+keywords = ["wait-free", "queue", "buffer", "non-blocking", "lock-free"]
+categories = ["concurrency", "memory-management", "data-structures"]
 
 [dependencies]
 crossbeam-utils = "0.8"
