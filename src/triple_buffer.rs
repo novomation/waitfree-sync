@@ -1,4 +1,17 @@
 //! Wait-free single-producer single-consumer (SPSC) triple buffer to share data between two threads.
+//!
+//! # Example
+//! ```rust
+//! use waitfree_sync::triple_buffer;
+//!
+//! let (mut wr, mut rd) = triple_buffer::triple_buffer();
+//! wr.write(42);
+//! assert_eq!(wr.try_read(), Some(42));
+//! assert_eq!(rd.try_read(), Some(42));
+//! ```
+//!
+//!
+
 use crate::import::{Arc, AtomicUsize, Ordering, UnsafeCell};
 use crossbeam_utils::CachePadded;
 

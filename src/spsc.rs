@@ -5,7 +5,7 @@
 //! ```rust
 //! use waitfree_sync::spsc;
 //!
-//! //                            Type ──╮   ╭─ Size
+//! //                            Type ──╮   ╭─ Capacity
 //! let (mut tx, mut rx) = spsc::spsc::<u64>(8);
 //! tx.try_send(234);
 //! assert_eq!(rx.try_recv(),Some(234u64));
@@ -17,21 +17,19 @@
 //!
 //! # Behaviuor on drop
 //!
-use crate::{
-    import::{Arc, AtomicBool, Ordering, UnsafeCell},
-    // EnqeueueError, ReadPrimitive, WritePrimitive,
-};
+use crate::import::{Arc, AtomicBool, Ordering, UnsafeCell};
 use core::error::Error;
 use crossbeam_utils::CachePadded;
 use std::fmt::Debug;
 
-/// Create a new wait-free SPSC queue. The size must be a power of two and is validate during runtime.
-/// ///
+/// Create a new wait-free SPSC queue. The capacity must be a power of two and is validate during runtime.
+/// # Panic
+/// Panics if the `capacity` is not a power of two.
 /// # Example
 /// ```rust
 /// use waitfree_sync::spsc;
 ///
-/// //               Data type ──╮   ╭─ Size
+/// //               Data type ──╮   ╭─ Capacity
 /// let (tx, rx) = spsc::spsc::<u64>(8);
 /// ```
 pub fn spsc<T>(capacity: usize) -> (Sender<T>, Receiver<T>) {
@@ -117,6 +115,7 @@ impl<T> Receiver<T> {
 }
 
 impl<T> Receiver<T> {
+    /// Try to retrieve the next available element of the channel.
     pub fn try_recv(&mut self) -> Option<T> {
         let rpos = self.read & self.spsc.mask;
         let slot = unsafe { self.spsc.mem.get_unchecked(rpos) };
@@ -145,7 +144,7 @@ impl<T> Receiver<T> {
             val.as_ref()
         }
     }
-
+    /// Returns the total number of items that the queue can hold at most.
     #[inline]
     pub fn capacity(&self) -> usize {
         // SAFETY: This is safe because we only read size which is never written.
@@ -167,6 +166,7 @@ impl<T> Sender<T> {
 }
 
 impl<T> Sender<T> {
+    /// Attempts to send a value on this channel without blocking.
     pub fn try_send(&mut self, data: T) -> Result<(), NoSpaceLeftError<T>> {
         let wpos = self.write & self.spsc.mask;
 
@@ -188,6 +188,7 @@ impl<T> Sender<T> {
         }
     }
 
+    /// Returns the total number of items that the queue can hold at most.
     #[inline]
     pub fn capacity(&self) -> usize {
         // SAFETY: This is safe because we only read size which is never written.

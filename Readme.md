@@ -4,68 +4,60 @@
 [![License](https://img.shields.io/badge/license-MIT_OR_Apache--2.0-blue.svg)](
 https://github.com/novomation/waitfree-sync#license)
 
-Wait-freedom is the strongest non-blocking guarantee, ensuring that every thread completes its operations within a bounded number of steps. Lock-freedom only guarantees system-wide progress.
-
-Wait-free synchronization primitives:
-* Do not allocate memory on demand
-* Are independent of scheduling
-* Are a good fit for real-time systems
-
+Wait-freedom is the strongest non-blocking guarantee, ensuring that every thread completes its operations within a bounded number of steps.
 This library provides a collection of wait-free algorithms.
 
 ## Usage
 
-Add to your `Cargo.toml`:
+Add the following to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-waitfree-sync = "0.1"
+waitfree-sync = " ... "
 ```
 
-## Examples
+## Triple Buffer
 
-### Triple Buffer
-
-A wait-free triple buffer for single-producer, single-consumer scenarios:
+A wait-free triple buffer for single-producer, single-consumer scenarios.
 
 ```rust
-use waitfree_sync::triple_buffer::triple_buffer;
+use waitfree_sync::triple_buffer;
 
 fn main() {
-    let (mut writer, mut reader) = triple_buffer();
+    let (mut wr, mut rd) = triple_buffer::triple_buffer();
 
-    writer.write(42);
-    assert_eq!(writer.read(), Some(42));
-    assert_eq!(reader.read(), Some(42));
+    wr.write(42);
+    assert_eq!(wr.try_read(), Some(42));
+    assert_eq!(rd.try_read(), Some(42));
 }
 ```
 
-### SPSC Queue
+## SPSC Queue
 
-A wait-free single-producer, single-consumer queue:
+A wait-free single-producer, single-consumer queue.
 
 ```rust
-use waitfree_sync::spsc::spsc;
+use waitfree_sync::spsc;
 
 fn main() {
-    let (mut writer, mut reader) = spsc::<_, 4>();
+    let (tx, rx) = spsc::spsc(8);
 
-    writer.write("hello").unwrap();
-    assert_eq!(reader.read(), Some("hello"));
+    tx.try_send("hello").unwrap();
+    assert_eq!(rx.try_recv(), Some("hello"));
 }
 ```
 
 ## Features
 
-- **No dynamic allocation:** All memory is allocated up front.
 - **No locks:** All operations are wait-free.
+- **No dynamic allocation:** All memory is allocated up front.
 - **Suitable for real-time systems:** Progress is guaranteed for every thread.
 
 ## License
 
 Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or [MIT license](LICENSE-MIT)
 
-## Readmap
+## Roadmap
 
 - [ ] Add nostd support
 - [ ] Add MPSC/SPMC/MPMC queues
