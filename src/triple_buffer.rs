@@ -37,6 +37,14 @@ impl<T> Shared<T> {
     }
 }
 
+/// Create a new wait-free riple buffer.
+/// # Example
+/// ```rust
+/// use waitfree_sync::triple_buffer;
+///
+/// //               Data type ──╮   ╭─ Capacity
+/// let (wr, rd) = triple_buffer::triple_buffer::<u64>();
+/// ```
 pub fn triple_buffer<T>() -> (Writer<T>, Reader<T>) {
     let chan = Arc::new(Shared::new());
 
@@ -45,6 +53,7 @@ pub fn triple_buffer<T>() -> (Writer<T>, Reader<T>) {
     (w, r)
 }
 
+/// The reading side of the [triple_buffer].
 #[derive(Debug)]
 pub struct Reader<T> {
     shared: Arc<Shared<T>>,
@@ -61,6 +70,8 @@ impl<T> Reader<T> {
         }
     }
 
+    /// Reads the latest available value.
+    /// Returns [None] if the [Writer] has not written anything yet.
     #[inline]
     pub fn try_read(&mut self) -> Option<T>
     where
@@ -83,6 +94,7 @@ impl<T> Reader<T> {
     }
 }
 
+/// The writing side of the [triple_buffer].
 #[derive(Debug)]
 pub struct Writer<T> {
     shared: Arc<Shared<T>>,
@@ -101,6 +113,8 @@ impl<T> Writer<T> {
         }
     }
 
+    /// Reads the latest available value.
+    /// Returns [None] if the [Writer] has not written anything yet.
     #[inline]
     pub fn try_read(&mut self) -> Option<T>
     where
@@ -115,6 +129,7 @@ impl<T> Writer<T> {
         val
     }
 
+    /// Writes an new value.
     #[inline]
     pub fn write(&mut self, data: T) {
         #[cfg(loom)]

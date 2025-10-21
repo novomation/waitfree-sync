@@ -1,4 +1,5 @@
 #![doc = include_str!("../Readme.md")]
+#![warn(missing_docs)]
 #[cfg(loom)]
 mod import {
     pub(crate) use loom::cell::UnsafeCell;

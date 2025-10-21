@@ -1,5 +1,5 @@
-//! Wait-free single-producer single-consumer (SPSC) queue to send data to another thread.
-//! Based on the improved FastForward queue.
+//! A wait-free single-producer single-consumer (SPSC) queue to send data to another thread.
+//! It is based on the improved FastForward queue.
 //!
 //! # Example
 //! ```rust
@@ -11,18 +11,17 @@
 //! assert_eq!(rx.try_recv(),Some(234u64));
 //! ```
 //!
-//! # Behaviour for full and empty queue.
-//! If the queue is full the [Sender] returns an [NoSpaceLeftError]
-//! If the queue is empty the [Receiver] returns `None`
-//!
-//! # Behaviuor on drop
+//! # Behavior for full and empty queue.
+//! If the queue is full, the [Sender] returns a [NoSpaceLeftError].
+//! If the queue is empty, the [Receiver] returns `None`
+
 //!
 use crate::import::{Arc, AtomicBool, Ordering, UnsafeCell};
 use core::error::Error;
 use crossbeam_utils::CachePadded;
 use std::fmt::Debug;
 
-/// Create a new wait-free SPSC queue. The capacity must be a power of two and is validate during runtime.
+/// Create a new wait-free SPSC queue. The `capacity` must be a power of two, which is validate during runtime.
 /// # Panic
 /// Panics if the `capacity` is not a power of two.
 /// # Example
@@ -50,12 +49,13 @@ const fn is_power_of_two(x: usize) -> bool {
     (x != 0) && (x != 1) && ((x & c) == 0)
 }
 
+/// Indicates that a queue is full.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NoSpaceLeftError<T>(T);
 impl<T: Debug> Error for NoSpaceLeftError<T> {}
 impl<T> core::fmt::Display for NoSpaceLeftError<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "No space left in the spsc queue.")
+        write!(f, "No space left in the SPSC queue.")
     }
 }
 
@@ -100,6 +100,7 @@ impl<T> Spsc<T> {
     }
 }
 
+/// The receiving side of the [spsc] queue.
 #[derive(Debug)]
 pub struct Receiver<T> {
     spsc: Arc<Spsc<T>>,
@@ -115,7 +116,8 @@ impl<T> Receiver<T> {
 }
 
 impl<T> Receiver<T> {
-    /// Try to retrieve the next available element of the channel.
+    /// Retrieve the next available element from the queue.
+    /// Returns [None] if the queue is empty.
     pub fn try_recv(&mut self) -> Option<T> {
         let rpos = self.read & self.spsc.mask;
         let slot = unsafe { self.spsc.mem.get_unchecked(rpos) };
@@ -132,7 +134,7 @@ impl<T> Receiver<T> {
             val
         }
     }
-    /// Peeks the next element in the queue withou removing it.
+    /// Peeks the next element in the queue without removing it.
     #[cfg(not(loom))] // We can't return a reference to an UnsafeCell of loom.
     pub fn peek(&self) -> Option<&T> {
         let rpos = self.read & self.spsc.mask;
@@ -152,6 +154,7 @@ impl<T> Receiver<T> {
     }
 }
 
+/// The sending side of the [spsc] queue.
 #[derive(Debug)]
 pub struct Sender<T> {
     spsc: Arc<Spsc<T>>,
@@ -166,7 +169,8 @@ impl<T> Sender<T> {
 }
 
 impl<T> Sender<T> {
-    /// Attempts to send a value on this channel without blocking.
+    /// Attempts to send a value to the queue without blocking.
+    /// Returns a [NoSpaceLeftError] if the queue is full.
     pub fn try_send(&mut self, data: T) -> Result<(), NoSpaceLeftError<T>> {
         let wpos = self.write & self.spsc.mask;
 
