@@ -1,3 +1,4 @@
+use core_affinity::CoreId;
 use criterion::{criterion_group, criterion_main, Criterion};
 use std::{
     hint::black_box,
@@ -20,14 +21,14 @@ fn test_threaded_single_write(c: &mut Criterion) {
             let barrier = barrier.clone();
             let stop = stop.clone();
             move || {
-                affinity::set_thread_affinity([1]).unwrap();
+                core_affinity::set_for_current(CoreId { id: 1 });
                 barrier.wait(); // wait for benchmark to start
                 while !stop.load(Ordering::Relaxed) {
                     let _ = rx.try_recv();
                 }
             }
         });
-        affinity::set_thread_affinity([2]).unwrap();
+        core_affinity::set_for_current(CoreId { id: 2 });
         // synchronize with consumer
         barrier.wait();
         b.iter(move || {
@@ -53,14 +54,14 @@ fn test_threaded_single_read(c: &mut Criterion) {
             let barrier = barrier.clone();
             let stop = stop.clone();
             move || {
-                affinity::set_thread_affinity([1]).unwrap();
+                core_affinity::set_for_current(CoreId { id: 1 });
                 barrier.wait(); // wait for benchmark to start
                 while !stop.load(Ordering::Relaxed) {
                     let _ = tx.try_send(5614);
                 }
             }
         });
-        affinity::set_thread_affinity([2]).unwrap();
+        core_affinity::set_for_current(CoreId { id: 2 });
         // synchronize with consumer
         barrier.wait();
         b.iter(move || {
