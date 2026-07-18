@@ -15,14 +15,26 @@ categories = ["concurrency", "memory-management", "data-structures"]
 
 [dependencies]
 crossbeam-utils = "0.8"
+libc = { version = "0.2", optional = true }
+tokio = { version = "1.53", features = ["net", "rt"], optional = true }
+
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }
 core_affinity = "0.8"
+tokio = { version = "1.53", features = [
+    "net",
+    "rt",
+    "rt-multi-thread",
+    "sync",
+] }
 
 [target.'cfg(loom)'.dependencies]
 loom = "0.7"
 
+[features]
+default = ["async"]
+async = ["dep:libc", "dep:tokio"]
 
 [[bench]]
 name = "spsc"

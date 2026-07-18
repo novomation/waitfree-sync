@@ -189,6 +189,89 @@ impl<T> Receiver<T> {
     pub fn is_empty(&self) -> bool {
         self.spsc.len() == 0
     }
+
+    /// Converts this [Receiver] into an [AsyncReceiver] that can be awaited on.
+    /// # Errors
+    /// Returns an [std::io::Error] if the underlying timer could not be created or configured.
+    #[cfg(feature = "async")]
+    pub async fn into_async(self) -> Result<AsyncReceiver<T>, std::io::Error> {
+        use libc::{timerfd_create, CLOCK_MONOTONIC};
+        use std::os::fd::{FromRawFd, OwnedFd};
+        use tokio::io::unix::AsyncFd;
+
+        let timer_fd = unsafe { timerfd_create(CLOCK_MONOTONIC, libc::TFD_CLOEXEC) };
+        if timer_fd == -1 {
+            return Err(std::io::Error::last_os_error());
+        }
+
+        let timer_fd = unsafe { OwnedFd::from_raw_fd(timer_fd) };
+        let mut async_receiver = AsyncReceiver {
+            receiver: self,
+            timer_fd: AsyncFd::new(timer_fd)?,
+        };
+        async_receiver.set_polling_rate(2000)?;
+        Ok(async_receiver)
+    }
+}
+
+/// The async receiving side of the [spsc] queue which can be created with [Receiver::into_async].
+/// The `AsyncReceiver` uses internally a polling mechanism base on timerfd.
+#[cfg(feature = "async")]
+pub struct AsyncReceiver<T> {
+    receiver: Receiver<T>,
+    timer_fd: tokio::io::unix::AsyncFd<std::os::fd::OwnedFd>,
+}
+#[cfg(feature = "async")]
+impl<T> AsyncReceiver<T> {
+    /// Asynchronously waits for and returns the next available element from the queue.
+    /// This polls the queue at the configured polling rate (see [AsyncReceiver::set_polling_rate])
+    /// until an element becomes available.
+    pub async fn recv(&mut self) -> T {
+        loop {
+            if let Some(val) = self.receiver.try_recv() {
+                return val;
+            }
+            if let Ok(guard) = self.timer_fd.readable().await {
+                use std::os::fd::AsRawFd;
+
+                let mut buf = [0u8; 8];
+                let _ = unsafe {
+                    use std::ffi::c_void;
+                    libc::read(
+                        guard.get_inner().as_raw_fd(),
+                        &raw mut buf as *mut c_void,
+                        buf.len(),
+                    )
+                };
+            }
+        }
+    }
+    /// Sets the interval, in microseconds, at which the [AsyncReceiver] polls the queue for new elements.
+    /// # Errors
+    /// Returns an [std::io::Error] if the underlying timer could not be reconfigured.
+    pub fn set_polling_rate(&mut self, rate_us: u64) -> Result<(), std::io::Error> {
+        use libc::itimerspec;
+        use libc::timerfd_settime;
+        use std::os::fd::AsRawFd;
+
+        let mut ts: itimerspec = unsafe { core::mem::zeroed() };
+
+        let cycletime_ns = rate_us as i64 * 1000;
+        // First expiration after 1 second
+        ts.it_value.tv_sec = 0;
+        ts.it_value.tv_nsec = cycletime_ns;
+
+        // Then every 500 ms
+        ts.it_interval.tv_sec = 0;
+        ts.it_interval.tv_nsec = cycletime_ns;
+        let ret =
+            unsafe { timerfd_settime(self.timer_fd.as_raw_fd(), 0, &ts, core::ptr::null_mut()) };
+
+        if ret == -1 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
+    }
 }
 
 /// The sending side of the [spsc] queue.
@@ -402,5 +485,41 @@ mod test {
         reader_thread.thread().unpark();
         assert!(writer_thread.join().is_ok());
         assert!(reader_thread.join().is_ok());
+    }
+
+    #[cfg(feature = "async")]
+    #[test]
+    fn test_tokio_smoke() {
+        use std::time::Duration;
+
+        let (mut sender, receiver) = spsc(2);
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let writer_thread = thread::spawn(move || {
+            thread::park();
+            for i in 0..1000 {
+                assert_eq!(sender.try_send([i; 50]), Ok(()));
+                std::thread::sleep(Duration::from_micros(500));
+            }
+        });
+        let notify = std::sync::Arc::new(tokio::sync::Notify::new());
+        let reader_thread = rt.spawn({
+            let notify = notify.clone();
+            async move {
+                println!("now running on a worker thread");
+                let mut receiver = receiver.into_async().await.unwrap();
+                receiver.set_polling_rate(1000).unwrap();
+                notify.notified().await;
+                for i in 0..1000 {
+                    assert_eq!(receiver.recv().await, [i; 50]);
+                }
+            }
+        });
+        notify.notify_one();
+        writer_thread.thread().unpark();
+        assert!(writer_thread.join().is_ok());
+        rt.block_on(async move {
+            reader_thread.await.unwrap();
+        });
+        // assert!(reader_thread..is_ok());
     }
 }
