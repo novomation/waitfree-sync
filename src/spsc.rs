@@ -1,6 +1,12 @@
 //! A wait-free single-producer single-consumer (SPSC) queue to send data to another thread.
 //! It is based on the improved FastForward queue.
 //!
+//! This is similar to [`std::sync::mpsc`], but restricted to a single producer and a single
+//! consumer and backed by a fixed-size ring buffer instead of an unbounded linked list. Because
+//! of this, [`Sender::try_send`] and [`Receiver::try_recv`] never block and never allocate: they
+//! return immediately instead of parking the calling thread the way `std`'s blocking `send`/`recv`
+//! do.
+//!
 //! # Example
 //! ```rust
 //! use waitfree_sync::spsc;
@@ -8,13 +14,12 @@
 //! //                            Type ──╮   ╭─ Capacity
 //! let (mut tx, mut rx) = spsc::spsc::<u64>(8);
 //! tx.try_send(234);
-//! assert_eq!(rx.try_recv(),Some(234u64));
+//! assert_eq!(rx.try_recv(),Ok(234u64));
 //! ```
 //!
 //! # Behavior for full and empty queue.
-//! If the queue is full, the [Sender] returns a [NoSpaceLeftError].
-//! If the queue is empty, the [Receiver] returns `None`
-
+//! If the queue is full, [`Sender::try_send`] returns [`SendError::NoSpaceLeft`].
+//! If the queue is empty, [`Receiver::try_recv`] returns [`TryRecvError::Empty`].
 //!
 use crate::import::{Arc, AtomicBool, Ordering, UnsafeCell};
 use core::error::Error;
@@ -49,13 +54,54 @@ const fn is_power_of_two(x: usize) -> bool {
     (x != 0) && (x != 1) && ((x & c) == 0)
 }
 
-/// Indicates that a queue is full.
+/// An error returned from the [`Sender::try_send`] function on a [`Sender`].
+///
+/// The error contains the data being sent as a payload so it can be recovered.
 #[derive(Clone, Debug, PartialEq)]
-pub struct NoSpaceLeftError<T>(T);
-impl<T: Debug> Error for NoSpaceLeftError<T> {}
-impl<T> core::fmt::Display for NoSpaceLeftError<T> {
+pub enum SendError<T> {
+    /// The queue is full. The receiving side of the queue must collect items.
+    NoSpaceLeft(T),
+    /// The receiving end of a channel is disconnected, implying that the data could never be received.
+    ReceiverSideDropped(T),
+}
+impl<T: Debug> Error for SendError<T> {}
+impl<T> core::fmt::Display for SendError<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "No space left in the SPSC queue.")
+        match self {
+            SendError::NoSpaceLeft(_) => write!(f, "No space left in the SPSC queue."),
+            SendError::ReceiverSideDropped(_) => {
+                write!(f, "Receiver side of the SPSC queue dropped.")
+            }
+        }
+    }
+}
+impl<T> SendError<T> {
+    /// Returns the value which was tried to be sent to the queue.
+    pub fn into_value(self) -> T {
+        match self {
+            SendError::NoSpaceLeft(val) => val,
+            SendError::ReceiverSideDropped(val) => val,
+        }
+    }
+}
+
+/// This enumeration is the list of the possible reasons that [`Receiver::try_recv`] could not return data when called.
+#[derive(Clone, Debug, PartialEq)]
+pub enum TryRecvError {
+    /// This queue is currently empty, but the Sender have not yet disconnected, so data may yet become available.
+    Empty,
+    /// The queues sending half has become disconnected, and there will never be any more data received on it.
+    Disconnected,
+}
+impl Error for TryRecvError {}
+impl core::fmt::Display for TryRecvError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TryRecvError::Empty => write!(f, "No data available in the SPSC queue."),
+            TryRecvError::Disconnected => {
+                write!(f, "Sender side of the SPSC queue dropped.")
+            }
+        }
     }
 }
 
@@ -126,14 +172,21 @@ impl<T> Receiver<T> {
 }
 
 impl<T> Receiver<T> {
-    /// Retrieve the next available element from the queue.
-    /// Returns [None] if the queue is empty.
-    pub fn try_recv(&mut self) -> Option<T> {
+    /// Retrieve the next available element from the queue without blocking.
+    ///
+    /// Returns [`TryRecvError::Empty`] if the queue is currently empty,
+    /// or [`TryRecvError::Disconnected`] if the [Sender] has been dropped and
+    /// no further items can arrive.
+    pub fn try_recv(&mut self) -> Result<T, TryRecvError> {
         let read = self.spsc.read.load(Ordering::Relaxed);
         let rpos = read & self.spsc.mask;
         let slot = unsafe { self.spsc.mem.get_unchecked(rpos) };
         if !slot.occupied.load(Ordering::Acquire) {
-            None
+            if Arc::strong_count(&self.spsc) < 2 {
+                Err(TryRecvError::Disconnected)
+            } else {
+                Err(TryRecvError::Empty)
+            }
         } else {
             #[cfg(not(loom))]
             let val = unsafe { slot.value.get().replace(None) };
@@ -145,7 +198,7 @@ impl<T> Receiver<T> {
             self.spsc
                 .read
                 .store(read.wrapping_add(1), Ordering::Relaxed);
-            val
+            Ok(val.ok_or(TryRecvError::Empty)?)
         }
     }
     /// Peeks the next element in the queue without removing it.
@@ -206,14 +259,21 @@ impl<T> Sender<T> {
 
 impl<T> Sender<T> {
     /// Attempts to send a value to the queue without blocking.
-    /// Returns a [NoSpaceLeftError] if the queue is full.
-    pub fn try_send(&mut self, data: T) -> Result<(), NoSpaceLeftError<T>> {
+    ///
+    /// Because this queue has a fixed capacity, sending returns [`SendError::NoSpaceLeft`]
+    /// instead of blocking or growing the buffer when the queue is full.
+    /// Returns [`SendError::ReceiverSideDropped`] if the [Receiver] has been dropped.
+    pub fn try_send(&mut self, data: T) -> Result<(), SendError<T>> {
         let write = self.spsc.write.load(Ordering::Relaxed);
         let wpos = write & self.spsc.mask;
 
+        if Arc::strong_count(&self.spsc) < 2 {
+            return Err(SendError::ReceiverSideDropped(data));
+        }
+
         let slot = unsafe { self.spsc.mem.get_unchecked(wpos) };
         if slot.occupied.load(Ordering::Acquire) {
-            Err(NoSpaceLeftError(data))
+            Err(SendError::NoSpaceLeft(data))
         } else {
             #[cfg(not(loom))]
             unsafe {
@@ -279,10 +339,10 @@ mod test {
         w.try_send(vec![0; 17]).unwrap();
         w.try_send(vec![0; 18]).unwrap();
 
-        assert_eq!(r.try_recv(), Some(vec![0; 15]));
-        assert_eq!(r.try_recv(), Some(vec![0; 16]));
-        assert_eq!(r.try_recv(), Some(vec![0; 17]));
-        assert_eq!(r.try_recv(), Some(vec![0; 18]));
+        assert_eq!(r.try_recv(), Ok(vec![0; 15]));
+        assert_eq!(r.try_recv(), Ok(vec![0; 16]));
+        assert_eq!(r.try_recv(), Ok(vec![0; 17]));
+        assert_eq!(r.try_recv(), Ok(vec![0; 18]));
     }
 
     #[test]
@@ -308,6 +368,34 @@ mod test {
     }
 
     #[test]
+    fn test_drop_read_side() {
+        let (mut write, read) = spsc::<i32>(4);
+
+        assert_eq!(write.try_send(1), Ok(()));
+        assert_eq!(write.len(), 1);
+        assert_eq!(write.try_send(2), Ok(()));
+        assert_eq!(write.len(), 2);
+        drop(read);
+        assert_eq!(write.try_send(3), Err(SendError::ReceiverSideDropped(3)));
+        assert_eq!(write.len(), 2);
+        assert_eq!(write.try_send(4), Err(SendError::ReceiverSideDropped(4)));
+        assert_eq!(write.len(), 2);
+        assert_eq!(write.try_send(5), Err(SendError::ReceiverSideDropped(5)));
+        assert_eq!(write.len(), 2);
+    }
+
+    #[test]
+    fn test_drop_write_side() {
+        let (mut write, mut read) = spsc::<i32>(4);
+
+        write.try_send(0).unwrap();
+        write.try_send(1).unwrap();
+        assert_eq!(read.try_recv(), Ok(0));
+        drop(write);
+        assert_eq!(read.try_recv(), Ok(1));
+    }
+
+    #[test]
     fn test_full_empty() {
         let (mut write, mut read) = spsc::<i32>(4);
         assert_eq!(write.try_send(1), Ok(()));
@@ -318,37 +406,37 @@ mod test {
         assert_eq!(write.len(), 3);
         assert_eq!(write.try_send(4), Ok(()));
         assert_eq!(write.len(), 4);
-        assert_eq!(write.try_send(5), Err(NoSpaceLeftError(5)));
+        assert_eq!(write.try_send(5), Err(SendError::NoSpaceLeft(5)));
         assert_eq!(write.len(), 4);
 
-        assert_eq!(read.try_recv(), Some(1));
+        assert_eq!(read.try_recv(), Ok(1));
         assert_eq!(write.len(), 3);
         assert_eq!(write.try_send(6), Ok(()));
         assert_eq!(write.len(), 4);
-        assert_eq!(read.try_recv(), Some(2));
+        assert_eq!(read.try_recv(), Ok(2));
         assert_eq!(write.len(), 3);
-        assert_eq!(read.try_recv(), Some(3));
+        assert_eq!(read.try_recv(), Ok(3));
         assert_eq!(write.len(), 2);
-        assert_eq!(read.try_recv(), Some(4));
+        assert_eq!(read.try_recv(), Ok(4));
         assert_eq!(write.len(), 1);
-        assert_eq!(read.try_recv(), Some(6));
-        assert_eq!(read.try_recv(), None);
+        assert_eq!(read.try_recv(), Ok(6));
+        assert_eq!(read.try_recv(), Err(TryRecvError::Empty));
     }
 
     #[test]
     fn test_drop_one_side() {
         let (mut write, read) = spsc::<i32>(4);
-        drop(read);
         assert_eq!(write.try_send(1), Ok(()));
         assert_eq!(write.len(), 1);
         assert_eq!(write.try_send(2), Ok(()));
         assert_eq!(write.len(), 2);
-        assert_eq!(write.try_send(3), Ok(()));
-        assert_eq!(write.len(), 3);
-        assert_eq!(write.try_send(4), Ok(()));
-        assert_eq!(write.len(), 4);
-        assert_eq!(write.try_send(5), Err(NoSpaceLeftError(5)));
-        assert_eq!(write.len(), 4);
+        drop(read);
+        assert_eq!(write.try_send(3), Err(SendError::ReceiverSideDropped(3)));
+        assert_eq!(write.len(), 2);
+        assert_eq!(write.try_send(4), Err(SendError::ReceiverSideDropped(4)));
+        assert_eq!(write.len(), 2);
+        assert_eq!(write.try_send(5), Err(SendError::ReceiverSideDropped(5)));
+        assert_eq!(write.len(), 2);
     }
 
     #[test]
@@ -360,15 +448,15 @@ mod test {
         w.try_send(vec![0; 18]).unwrap();
 
         assert_eq!(r.peek(), Some(&vec![0; 15]));
-        assert_eq!(r.try_recv(), Some(vec![0; 15]));
+        assert_eq!(r.try_recv(), Ok(vec![0; 15]));
         assert_eq!(r.peek(), Some(&vec![0; 16]));
-        assert_eq!(r.try_recv(), Some(vec![0; 16]));
+        assert_eq!(r.try_recv(), Ok(vec![0; 16]));
         assert_eq!(r.peek(), Some(&vec![0; 17]));
-        assert_eq!(r.try_recv(), Some(vec![0; 17]));
+        assert_eq!(r.try_recv(), Ok(vec![0; 17]));
         assert_eq!(r.peek(), Some(&vec![0; 18]));
         assert_eq!(r.peek(), Some(&vec![0; 18]));
         assert_eq!(r.peek(), Some(&vec![0; 18]));
-        assert_eq!(r.try_recv(), Some(vec![0; 18]));
+        assert_eq!(r.try_recv(), Ok(vec![0; 18]));
         assert_eq!(r.peek(), None);
     }
 
@@ -384,7 +472,8 @@ mod test {
         });
         let reader_thread = thread::spawn(move || {
             thread::park();
-            for _ in 0..4 {
+            let mut i = 0;
+            while i < 4 {
                 if let Some(val) = receiver.peek() {
                     let first_entry = val[0];
                     for entry in val {
@@ -395,6 +484,7 @@ mod test {
                     for entry in val {
                         assert_eq!(entry, first_entry);
                     }
+                    i += 1;
                 }
             }
         });

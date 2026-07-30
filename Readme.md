@@ -46,7 +46,7 @@ use waitfree_sync::spsc;
 let (mut tx, mut rx) = spsc::spsc(8);
 
 tx.try_send("hello").unwrap();
-assert_eq!(rx.try_recv(), Some("hello"));
+assert_eq!(rx.try_recv(), Ok("hello"));
 ```
 
 ## Features
