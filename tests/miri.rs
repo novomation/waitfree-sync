@@ -1,7 +1,9 @@
 use common::{ReadPrimitive, WritePrimitive};
+
 #[cfg(loom)]
 use loom::thread;
 use std::fmt::Debug;
+
 #[cfg(not(loom))]
 use std::thread;
 use waitfree_sync::spsc;
@@ -32,6 +34,7 @@ fn test_multithread<E: PartialEq + Debug>(
         for i in 0..COUNT {
             assert_eq!(writer.write([i as i32; 50]), Ok(()));
         }
+        writer
     });
     let reader_thread = thread::spawn(move || {
         thread::park();
@@ -43,6 +46,7 @@ fn test_multithread<E: PartialEq + Debug>(
                 }
             }
         }
+        reader
     });
     writer_thread.thread().unpark();
     reader_thread.thread().unpark();
@@ -104,6 +108,7 @@ fn test_heapdata_multithread<E: PartialEq + Debug>(
                 Ok(())
             );
         }
+        writer
     });
     let reader_thread = thread::spawn(move || {
         thread::park();
@@ -112,6 +117,7 @@ fn test_heapdata_multithread<E: PartialEq + Debug>(
                 assert_eq!(val.inner_field, vec![Some(SomeEnum::State1)]);
             }
         }
+        reader
     });
     writer_thread.thread().unpark();
     reader_thread.thread().unpark();
