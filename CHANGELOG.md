@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-03
+
+### Added
+
+- Add `is_disconnected` method.
+
 ## [0.4.0] - 2026-07-30
 
 ### Added
