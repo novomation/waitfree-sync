@@ -182,7 +182,7 @@ impl<T> Receiver<T> {
         let rpos = read & self.spsc.mask;
         let slot = unsafe { self.spsc.mem.get_unchecked(rpos) };
         if !slot.occupied.load(Ordering::Acquire) {
-            if Arc::strong_count(&self.spsc) < 2 {
+            if self.is_disconnected() {
                 Err(TryRecvError::Disconnected)
             } else {
                 Err(TryRecvError::Empty)
@@ -242,6 +242,15 @@ impl<T> Receiver<T> {
     pub fn is_empty(&self) -> bool {
         self.spsc.len() == 0
     }
+
+    /// Returns true if the channel is disconnected because the sender was dropped.
+    ///
+    /// Note that a return value of false does not guarantee the channel will remain connected.
+    /// The channel may be disconnected immediately after this method returns, so a subsequent [Sender::try_send] may still fail with SendError.
+    #[inline]
+    pub fn is_disconnected(&self) -> bool {
+        Arc::strong_count(&self.spsc) < 2
+    }
 }
 
 /// The sending side of the [spsc] queue.
@@ -267,7 +276,7 @@ impl<T> Sender<T> {
         let write = self.spsc.write.load(Ordering::Relaxed);
         let wpos = write & self.spsc.mask;
 
-        if Arc::strong_count(&self.spsc) < 2 {
+        if self.is_disconnected() {
             return Err(SendError::ReceiverSideDropped(data));
         }
 
@@ -318,6 +327,15 @@ impl<T> Sender<T> {
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.spsc.len() == 0
+    }
+
+    /// Returns true if the channel is disconnected because the receiver was dropped.
+    ///
+    /// Note that a return value of false does not guarantee the channel will remain connected.
+    /// The channel may be disconnected immediately after this method returns, so a subsequent [Sender::try_send] may still fail with SendError.
+    #[inline]
+    pub fn is_disconnected(&self) -> bool {
+        Arc::strong_count(&self.spsc) < 2
     }
 }
 
@@ -492,5 +510,20 @@ mod test {
         reader_thread.thread().unpark();
         assert!(writer_thread.join().is_ok());
         assert!(reader_thread.join().is_ok());
+    }
+
+    #[test]
+    fn test_dissconnect() {
+        let (tx, rx) = spsc::<u32>(4);
+        assert!(!tx.is_disconnected());
+        assert!(!rx.is_disconnected());
+        drop(tx);
+        assert!(rx.is_disconnected());
+
+        let (tx, rx) = spsc::<u32>(4);
+        assert!(!tx.is_disconnected());
+        assert!(!rx.is_disconnected());
+        drop(rx);
+        assert!(tx.is_disconnected());
     }
 }
